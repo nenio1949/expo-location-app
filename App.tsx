@@ -3,7 +3,6 @@ import { StyleSheet, Text, View, Button, SafeAreaView, ScrollView, StatusBar } f
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import PermissionsButton from './PermissionsButton';
 import dayjs from 'dayjs';
 import Storage from './storage';
 
@@ -13,16 +12,13 @@ const LOCATION_TASK_NAME = 'background-location-task';
 // 1. Define the task by providing a name and the function that should be executed
 // Note: This needs to be called in the global scope (e.g outside of your React components)
 TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+  console.log('进入后台任务');
   const position = await getCurrentLocation();
-  console.log('🚀 ~ file: App.tsx:16 ~ TaskManager.defineTask ~ position:', JSON.stringify(position));
-  // const address = await Location.reverseGeocodeAsync({
-  //   longitude: position.coords.longitude,
-  //   latitude: position.coords.latitude,
-  // });
-
-  // console.log(
-  //   `${dayjs(new Date()).format('YYYY-MM-DD HH:mm:ss')}： ${address[0].city}${address[0].district}${address[0].name}`
-  // );
+  console.log(
+    `${dayjs(new Date()).format('YYYY-MM-DD HH:mm:ss')}  经度：${position?.coords?.longitude}，纬度：${
+      position?.coords?.latitude
+    }`
+  );
   const datas = await Storage.get('_Location_List');
   if (!datas) {
     await Storage.set('_Location_List', [
@@ -42,16 +38,35 @@ TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
   return BackgroundFetch.BackgroundFetchResult.NewData;
 });
 
+TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
+  if (error) {
+    console.log('🚀 ~ file: App.tsx:38 ~ TaskManager.defineTask ~ error:', error);
+
+    // Error occurred - check `error.message` for more details.
+    return;
+  }
+  // if (data) {
+  //   console.log('🚀 ~ file: PermissionsButton.tsx:33 ~ TaskManager.defineTask ~ locations:', JSON.stringify(data));
+  //   // do something with the locations captured in the background
+  // }
+});
+
 async function getCurrentLocation() {
   const timeout = 10000;
   return new Promise<Location.LocationObject | null>(async (resolve, reject) => {
-    setTimeout(() => {
-      reject(new Error(`Error getting gps location after ${(timeout * 2) / 1000} s`));
-    }, timeout * 2);
+    // setTimeout(() => {
+    //   reject(new Error(`Error getting gps location after ${(timeout * 2) / 1000} s`));
+    // }, timeout * 2);
     setTimeout(async () => {
       resolve(await Location.getLastKnownPositionAsync());
     }, timeout);
-    resolve(await Location.getCurrentPositionAsync());
+    resolve(
+      await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Highest,
+        distanceInterval: 100,
+        timeInterval: 10000,
+      })
+    );
   });
 }
 
@@ -61,7 +76,7 @@ async function getCurrentLocation() {
 async function registerBackgroundFetchAsync() {
   await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME);
   return BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
-    minimumInterval: 60 * 15, // 15 minutes
+    minimumInterval: 60, // 15 minutes
     stopOnTerminate: false, // android only,
     startOnBoot: true, // android only
   });
@@ -133,6 +148,34 @@ export default function App() {
     setList([]);
   };
 
+  const handleLocation = async () => {
+    const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+    console.log('前台定位权限', foregroundStatus);
+    if (foregroundStatus === 'granted') {
+      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundStatus === 'granted') {
+        const position = await getCurrentLocation();
+
+        console.log('5555', position);
+        const datas = await Storage.get('_Location_List');
+        if (!datas) {
+          await Storage.set('_Location_List', [
+            `${dayjs(new Date()).format('YYYY-MM-DD HH:mm:ss')}  经度：${position?.coords?.longitude}，纬度：${
+              position?.coords?.latitude
+            }`,
+          ]);
+        } else {
+          datas.push(
+            `${dayjs(new Date()).format('YYYY-MM-DD HH:mm:ss')}  经度：${position?.coords?.longitude}，纬度：${
+              position?.coords?.latitude
+            }`
+          );
+          await Storage.set('_Location_List', [...datas]);
+        }
+      }
+    }
+  };
+
   return (
     <SafeAreaView>
       <StatusBar />
@@ -153,7 +196,7 @@ export default function App() {
             title={isRegistered ? 'Unregister BackgroundFetch task' : 'Register BackgroundFetch task'}
             onPress={toggleFetchTask}
           />
-          <PermissionsButton />
+          <Button title='获取位置' onPress={handleLocation} />
           <View style={styles.logBox}>
             <Button title='清空记录' onPress={handleClear} />
             {list.map((item, index) => {
